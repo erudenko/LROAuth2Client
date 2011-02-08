@@ -6,7 +6,15 @@
 //  Copyright 2010 LJR Software Limited. All rights reserved.
 //
 
+// Ievgen Rudenko: Uncomment this to ise TouchJSON instead of YAJL
+//#define LROAUTH2_USE_TOUCHJSON
+
+
+#ifdef LROAUTH2_USE_TOUCHJSON
+#import "CJSONDeserializer.h"
+#else
 #import <YAJLIOS/NSObject+YAJL.h>
+#endif
 #import "LROAuth2Client.h"
 #import "ASIHTTPRequest.h"
 #import "NSURL+QueryInspector.h"
@@ -143,7 +151,11 @@
         NSLog(@"[oauth] finished verification request, %@ (%d)  %@", [request responseString], [request responseStatusCode], [request responseData]);
     }
     NSError *parseError = nil;
+#ifdef LROAUTH2_USE_TOUCHJSON
+    NSDictionary *authorizationData = [[CJSONDeserializer deserializer] deserializeAsDictionary:request.responseData error:&parseError];
+#else
     NSDictionary *authorizationData = [request.responseData yajl_JSON:&parseError];
+#endif
     if (parseError) {
         // try and decode the response body as a query string instead
         NSString *responseString = [[NSString alloc] initWithData:request.responseData encoding:NSUTF8StringEncoding];
