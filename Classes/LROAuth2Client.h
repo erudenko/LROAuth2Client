@@ -10,6 +10,12 @@
 #import "ASIHTTPRequestDelegate.h"
 #import "LROAuth2ClientDelegate.h"
 
+
+typedef enum {
+    LROAuth2ServerSideFlow, //know as the authentication code flow in the specification
+    LROAuth2ClientSideFlow  //client-side (known as the implicit flow)
+} LROAuth2Flow; 
+
 @class LROAuth2AccessToken;
 
 @interface LROAuth2Client : NSObject <ASIHTTPRequestDelegate> {
@@ -23,9 +29,10 @@
   NSMutableArray *requests;
   id<LROAuth2ClientDelegate> delegate;
   BOOL debug;
-  
+  LROAuth2Flow authFlow;
  @private
-  BOOL isVerifying;   
+  BOOL isVerifying;  
+  
 }
 @property (nonatomic, copy) NSString *clientID;
 @property (nonatomic, copy) NSString *clientSecret;
@@ -36,6 +43,7 @@
 @property (nonatomic, readonly) LROAuth2AccessToken *accessToken;
 @property (nonatomic, assign) id<LROAuth2ClientDelegate> delegate;
 @property (nonatomic, assign) BOOL debug;
+@property (nonatomic, assign) LROAuth2Flow authFlow;
 
 - (id)initWithClientID:(NSString *)_clientID 
                 secret:(NSString *)_secret 
@@ -50,4 +58,5 @@
 - (void)authorizeUsingWebView:(UIWebView *)webView;
 - (void)authorizeUsingWebView:(UIWebView *)webView additionalParameters:(NSDictionary *)additionalParameters;
 - (void)extractAccessCodeFromCallbackURL:(NSURL *)url;
+- (void)extractAccessTokenFromCallbackURL:(NSURL *)url;
 @end

@@ -26,6 +26,7 @@
 @synthesize delegate;
 @synthesize accessToken;
 @synthesize debug;
+@synthesize authFlow;
 
 - (id)initWithClientID:(NSString *)_clientID 
                 secret:(NSString *)_secret 
@@ -64,10 +65,12 @@
 - (NSURLRequest *)userAuthorizationRequestWithParameters:(NSDictionary *)additionalParameters;
 {
   NSDictionary *params = [NSMutableDictionary dictionary];
-  [params setValue:@"web_server" forKey:@"type"];
   [params setValue:clientID forKey:@"client_id"];
   [params setValue:[redirectURL absoluteString] forKey:@"redirect_uri"];
-  
+  if (authFlow == LROAuth2ClientSideFlow) 
+      [params setValue:@"token" forKey:@"response_type"];
+  else 
+      [params setValue:@"web_server" forKey:@"type"];  
   if (additionalParameters) {
     for (NSString *key in additionalParameters) {
       [params setValue:[additionalParameters valueForKey:key] forKey:key];
@@ -136,12 +139,33 @@
 
 - (void)requestFinished:(ASIHTTPRequest *)request
 {
-  if (self.debug) {
-    NSLog(@"[oauth] finished verification request, %@ (%d)", [request responseString], [request responseStatusCode]);
-  }
-  isVerifying = NO;
-  
-  [requests removeObject:request];
+    if (self.debug) {
+        NSLog(@"[oauth] finished verification request, %@ (%d)  %@", [request responseString], [request responseStatusCode], [request responseData]);
+    }
+    NSError *parseError = nil;
+    NSDictionary *authorizationData = [request.responseData yajl_JSON:&parseError];
+    if (parseError) {
+        // try and decode the response body as a query string instead
+        NSString *responseString = [[NSString alloc] initWithData:request.responseData encoding:NSUTF8StringEncoding];
+        authorizationData = [NSDictionary dictionaryWithFormEncodedString:responseString];
+        if ([authorizationData valueForKey:@"access_token"] == nil) { 
+            // TODO handle complete parsing failure
+            NSAssert(NO, @"Unhandled parsing failure");
+        }
+    }  
+    if (accessToken == nil) {
+        accessToken = [[LROAuth2AccessToken alloc] initWithAuthorizationResponse:authorizationData];
+        if ([self.delegate respondsToSelector:@selector(oauthClientDidReceiveAccessToken:)]) {
+            [self.delegate oauthClientDidReceiveAccessToken:self];
+        } 
+    } else {
+        [accessToken refreshFromAuthorizationResponse:authorizationData];
+        if ([self.delegate respondsToSelector:@selector(oauthClientDidRefreshAccessToken:)]) {
+            [self.delegate oauthClientDidRefreshAccessToken:self];
+        }
+    }
+    isVerifying = NO;
+    [requests removeObject:request];
 }
 
 - (void)requestFailed:(ASIHTTPRequest *)request
@@ -149,40 +173,11 @@
   if (self.debug) {
     NSLog(@"[oauth] request failed with code %d, %@", [request responseStatusCode], [request responseString]);
   }
+  isVerifying = NO;
+  [requests removeObject:request];
+    
 }
 
-- (void)request:(ASIHTTPRequest *)request didReceiveData:(NSData *)rawData
-{
-  NSData* data = rawData;
-  if( [request isResponseCompressed]) {
-    data = [ASIHTTPRequest uncompressZippedData:rawData];
-  }
-    
-  NSError *parseError = nil;
-  NSDictionary *authorizationData = [data yajl_JSON:&parseError];
-  
-  if (parseError) {
-    // try and decode the response body as a query string instead
-    NSString *responseString = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    authorizationData = [NSDictionary dictionaryWithFormEncodedString:responseString];
-    [responseString release];
-    if ([authorizationData valueForKey:@"access_token"] == nil) { 
-      // TODO handle complete parsing failure
-      NSAssert(NO, @"Unhandled parsing failure");
-    }
-  }  
-  if (accessToken == nil) {
-    accessToken = [[LROAuth2AccessToken alloc] initWithAuthorizationResponse:authorizationData];
-    if ([self.delegate respondsToSelector:@selector(oauthClientDidReceiveAccessToken:)]) {
-      [self.delegate oauthClientDidReceiveAccessToken:self];
-    } 
-  } else {
-    [accessToken refreshFromAuthorizationResponse:authorizationData];
-    if ([self.delegate respondsToSelector:@selector(oauthClientDidRefreshAccessToken:)]) {
-      [self.delegate oauthClientDidRefreshAccessToken:self];
-    }
-  }
-}
 
 @end
 
@@ -202,8 +197,11 @@
 - (BOOL)webView:(UIWebView *)webView shouldStartLoadWithRequest:(NSURLRequest *)request navigationType:(UIWebViewNavigationType)navigationType;
 {  
   if ([[request.URL absoluteString] hasPrefix:[self.redirectURL absoluteString]]) {
-    [self extractAccessCodeFromCallbackURL:request.URL];
-
+    if (authFlow == LROAuth2ServerSideFlow) {
+        [self extractAccessCodeFromCallbackURL:request.URL];
+    } else {
+        [self extractAccessTokenFromCallbackURL:request.URL];
+    }
     return NO;
   } else if (self.cancelURL && [[request.URL absoluteString] hasPrefix:[self.cancelURL absoluteString]]) {
     if ([self.delegate respondsToSelector:@selector(oauthClientDidCancel:)]) {
@@ -271,4 +269,18 @@
   [self verifyAuthorizationWithAccessCode:accessCode];
 }
 
+- (void)extractAccessTokenFromCallbackURL:(NSURL *)url {
+    NSDictionary *authorizationData = [NSDictionary dictionaryWithFormEncodedString:[url fragment]];
+    if (accessToken == nil) {
+        accessToken = [[LROAuth2AccessToken alloc] initWithAuthorizationResponse:authorizationData];
+        if ([self.delegate respondsToSelector:@selector(oauthClientDidReceiveAccessToken:)]) {
+            [self.delegate oauthClientDidReceiveAccessToken:self];
+        } 
+    } else {
+        [accessToken refreshFromAuthorizationResponse:authorizationData];
+        if ([self.delegate respondsToSelector:@selector(oauthClientDidRefreshAccessToken:)]) {
+            [self.delegate oauthClientDidRefreshAccessToken:self];
+        }
+    }
+}
 @end
